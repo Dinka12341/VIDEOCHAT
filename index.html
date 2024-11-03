@@ -17,7 +17,7 @@
             margin-bottom: 20px;
         }
         video {
-            width: 300px;
+            width: 600px;
             height: auto;
             border: 1px solid #ccc;
             margin: 0 10px;
@@ -49,19 +49,18 @@
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
         let localStream;
-        let remoteStream;
-        let peerConnection;
+        let peerConnections = {};
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
             const message = JSON.parse(event.data);
             if (message.type === 'clientCount') {
                 document.getElementById('userCount').textContent = `Пользователи в сети: ${message.count}`;
             } else if (message.type === 'offer') {
-                handleOffer(message.offer);
+                await handleOffer(message.offer, message.from);
             } else if (message.type === 'answer') {
-                handleAnswer(message.answer);
+                await handleAnswer(message.answer, message.from);
             } else if (message.type === 'iceCandidate') {
-                handleICECandidate(message.candidate);
+                await handleICECandidate(message.candidate, message.from);
             }
         };
 
@@ -69,50 +68,70 @@
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             localVideo.srcObject = localStream;
 
-            peerConnection = new RTCPeerConnection();
+            // Создаем новый peerConnection для каждого нового звонка
+            const peerConnection = new RTCPeerConnection();
+
+            // Добавляем треки из локального потока
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
+            // Обработка получения удаленного потока
             peerConnection.ontrack = (event) => {
                 remoteVideo.srcObject = event.streams[0];
             };
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate }));
+                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate, from: ws.id }));
                 }
             };
 
+            // Отправляем offer всем подключенным клиентам
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', offer }));
+            ws.send(JSON.stringify({ type: 'offer', offer, from: ws.id }));
+
+            peerConnections[ws.id] = peerConnection; // Храним peerConnection для каждого клиента
         }
 
-        async function handleOffer(offer) {
-            peerConnection = new RTCPeerConnection();
+        async function handleOffer(offer, from) {
+            const peerConnection = new RTCPeerConnection();
+
+            // Обрабатываем входящее предложение
             await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+            // Добавляем треки из локального потока
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
-            ws.send(JSON.stringify({ type: 'answer', answer }));
+            ws.send(JSON.stringify({ type: 'answer', answer, from: ws.id }));
 
+            // Обрабатываем удаленный поток
             peerConnection.ontrack = (event) => {
                 remoteVideo.srcObject = event.streams[0];
             };
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate }));
+                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate, from: ws.id }));
                 }
             };
+
+            peerConnections[from] = peerConnection; // Храним peerConnection для отправителя
         }
 
-        async function handleAnswer(answer) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        async function handleAnswer(answer, from) {
+            const peerConnection = peerConnections[from];
+            if (peerConnection) {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            }
         }
 
-        function handleICECandidate(candidate) {
-            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        async function handleICECandidate(candidate, from) {
+            const peerConnection = peerConnections[from];
+            if (peerConnection) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
         }
 
         document.getElementById('startCall').onclick = () => {
@@ -123,10 +142,13 @@
 
         document.getElementById('endCall').onclick = () => {
             localStream.getTracks().forEach(track => track.stop());
-            peerConnection.close();
+            for (let key in peerConnections) {
+                peerConnections[key].close();
+                delete peerConnections[key];
+            }
+            remoteVideo.srcObject = null; // Убираем удаленное видео
             document.getElementById('startCall').style.display = 'block';
             document.getElementById('endCall').style.display = 'none';
-            remoteVideo.srcObject = null;
         };
     </script>
 </body>
