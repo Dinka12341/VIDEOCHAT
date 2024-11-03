@@ -1,27 +1,29 @@
 const WebSocket = require('ws');
 
-const wss = new WebSocket.Server({ port: 8080 });
+const PORT = process.env.PORT || 8080;
+const wss = new WebSocket.Server({ port: PORT });
 
-let clients = new Map();
+let clients = new Set(); // Используем Set для уникальных подключений
 
 wss.on('connection', (ws) => {
-    const clientId = Date.now();
-    clients.set(clientId, ws);
-    console.log(`Клиент подключен: ${clientId}`);
+    // Добавляем нового клиента в набор
+    clients.add(ws);
+    console.log(`Клиент подключен: ${clients.size} клиентов в сети`);
 
-    // Уведомление о новом подключении
+    // Уведомляем всех клиентов о текущем количестве
     broadcastClientCount();
 
     ws.on('message', (message) => {
-        console.log(`Получено сообщение от клиента ${clientId}: ${message}`);
+        console.log(`Получено сообщение: ${message}`);
         // Пересылаем сообщение всем остальным клиентам
         broadcastMessage(message);
     });
 
     ws.on('close', () => {
-        console.log(`Клиент отключен: ${clientId}`);
-        clients.delete(clientId);
-        // Уведомление об отключении
+        // Удаляем клиента из набора при отключении
+        clients.delete(ws);
+        console.log(`Клиент отключен: ${clients.size} клиентов в сети`);
+        // Уведомляем всех клиентов о текущем количестве
         broadcastClientCount();
     });
 });
@@ -29,7 +31,9 @@ wss.on('connection', (ws) => {
 // Функция для пересылки сообщений всем клиентам
 function broadcastMessage(message) {
     clients.forEach((client) => {
-        client.send(message);
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+        }
     });
 }
 
@@ -40,4 +44,4 @@ function broadcastClientCount() {
     broadcastMessage(countMessage);
 }
 
-console.log('Сервер запущен на http://localhost:8080');
+console.log(`Сервер запущен на http://videochat-c55f.onrender.com`);
