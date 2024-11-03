@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Видеозвонок</title>
+    <title>Видеозвонок и Чат</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -32,10 +32,25 @@
             margin-bottom: 20px;
             font-size: 18px;
         }
+        #chatContainer {
+            margin-top: 20px;
+        }
+        #chatMessages {
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #chatInput {
+            width: 300px;
+            padding: 10px;
+        }
     </style>
 </head>
 <body>
-    <h1>Видеозвонок</h1>
+    <h1>Видеозвонок и Чат</h1>
     <div id="userCount">Пользователи в сети: 0</div>
     <div id="videoContainer">
         <video id="localVideo" autoplay muted></video>
@@ -44,10 +59,19 @@
     <button id="startCall">Начать звонок</button>
     <button id="endCall" style="display: none;">Закончить звонок</button>
 
+    <div id="chatContainer">
+        <div id="chatMessages"></div>
+        <input type="text" id="chatInput" placeholder="Введите сообщение..." />
+        <button id="sendMessage">Отправить</button>
+    </div>
+
     <script>
         const ws = new WebSocket('wss://videochat-c55f.onrender.com');
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const sendMessageButton = document.getElementById('sendMessage');
         let localStream;
         let peerConnections = {};
 
@@ -61,6 +85,8 @@
                 await handleAnswer(message.answer, message.from);
             } else if (message.type === 'iceCandidate') {
                 await handleICECandidate(message.candidate, message.from);
+            } else if (message.type === 'chatMessage') {
+                displayMessage(message.from, message.text);
             }
         };
 
@@ -132,6 +158,22 @@
             if (peerConnection) {
                 await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             }
+        }
+
+        sendMessageButton.onclick = () => {
+            const messageText = chatInput.value;
+            if (messageText) {
+                ws.send(JSON.stringify({ type: 'chatMessage', from: ws.id, text: messageText }));
+                displayMessage('Вы', messageText); // Отображаем сообщение отправителя
+                chatInput.value = ''; // Очищаем поле ввода
+            }
+        };
+
+        function displayMessage(from, text) {
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = `${from}: ${text}`;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Прокручиваем вниз
         }
 
         document.getElementById('startCall').onclick = () => {
