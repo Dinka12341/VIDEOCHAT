@@ -4,36 +4,129 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Видеозвонок</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+            padding: 20px;
+        }
+        #videoContainer {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        video {
+            width: 300px;
+            height: auto;
+            border: 1px solid #ccc;
+            margin: 0 10px;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #userCount {
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+    </style>
 </head>
 <body>
     <h1>Видеозвонок</h1>
     <div id="userCount">Пользователи в сети: 0</div>
+    <div id="videoContainer">
+        <video id="localVideo" autoplay muted></video>
+        <video id="remoteVideo" autoplay></video>
+    </div>
     <button id="startCall">Начать звонок</button>
     <button id="endCall" style="display: none;">Закончить звонок</button>
 
     <script>
-        // Используем URL вашего сервера на Render
         const ws = new WebSocket('wss://videochat-c55f.onrender.com');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        let localStream;
+        let remoteStream;
+        let peerConnection;
 
         ws.onmessage = (event) => {
             const message = JSON.parse(event.data);
             if (message.type === 'clientCount') {
                 document.getElementById('userCount').textContent = `Пользователи в сети: ${message.count}`;
-            } else {
-                // Обработка других типов сообщений
+            } else if (message.type === 'offer') {
+                handleOffer(message.offer);
+            } else if (message.type === 'answer') {
+                handleAnswer(message.answer);
+            } else if (message.type === 'iceCandidate') {
+                handleICECandidate(message.candidate);
             }
         };
 
+        async function startCall() {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+
+            peerConnection = new RTCPeerConnection();
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate }));
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', offer }));
+        }
+
+        async function handleOffer(offer) {
+            peerConnection = new RTCPeerConnection();
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            ws.send(JSON.stringify({ type: 'answer', answer }));
+
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate }));
+                }
+            };
+        }
+
+        async function handleAnswer(answer) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+
+        function handleICECandidate(candidate) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+
         document.getElementById('startCall').onclick = () => {
-            // Логика начала звонка
+            startCall();
             document.getElementById('startCall').style.display = 'none';
             document.getElementById('endCall').style.display = 'block';
         };
 
         document.getElementById('endCall').onclick = () => {
-            // Логика окончания звонка
+            localStream.getTracks().forEach(track => track.stop());
+            peerConnection.close();
             document.getElementById('startCall').style.display = 'block';
             document.getElementById('endCall').style.display = 'none';
+            remoteVideo.srcObject = null;
         };
     </script>
 </body>
