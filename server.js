@@ -1,47 +1,55 @@
+const express = require('express');
+const http = require('http');
 const WebSocket = require('ws');
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+let clients = new Set();
 
-let clients = new Set(); // Используем Set для уникальных подключений
+app.use(express.static('public'));
 
 wss.on('connection', (ws) => {
-    // Добавляем нового клиента в набор
+    console.log('Новый клиент подключен');
     clients.add(ws);
-    console.log(`Клиент подключен: ${clients.size} клиентов в сети`);
-
-    // Уведомляем всех клиентов о текущем количестве
-    broadcastClientCount();
-
+    
     ws.on('message', (message) => {
-        console.log(`Получено сообщение: ${message}`);
-        // Пересылаем сообщение всем остальным клиентам
-        broadcastMessage(message);
+        // Проверка, если сообщение является текстом
+        if (typeof message === 'string') {
+            console.log('Получено текстовое сообщение:', message);
+            // Отправляем сообщение всем клиентам
+            clients.forEach(client => {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(message);
+                }
+            });
+        } else if (message instanceof Buffer || message instanceof Blob) {
+            console.log('Получены бинарные данные');
+            // Обработка бинарных данных (например, видео или аудио)
+            clients.forEach(client => {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(message);
+                }
+            });
+        }
     });
 
     ws.on('close', () => {
-        // Удаляем клиента из набора при отключении
+        console.log('Клиент отключен');
         clients.delete(ws);
-        console.log(`Клиент отключен: ${clients.size} клиентов в сети`);
-        // Уведомляем всех клиентов о текущем количестве
-        broadcastClientCount();
     });
 });
 
-// Функция для пересылки сообщений всем клиентам
-function broadcastMessage(message) {
-    clients.forEach((client) => {
+setInterval(() => {
+    const onlineCount = clients.size;
+    clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
+            client.send(JSON.stringify({ type: 'onlineCount', count: onlineCount }));
         }
     });
-}
+}, 5000);
 
-// Функция для уведомления всех клиентов о количестве подключенных участников
-function broadcastClientCount() {
-    const count = clients.size;
-    const countMessage = JSON.stringify({ type: 'clientCount', count });
-    broadcastMessage(countMessage);
-}
-
-console.log(`Сервер запущен на http://videochat-c55f.onrender.com`);
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+    console.log(`Сервер запущен на порту ${PORT}`);
+});
