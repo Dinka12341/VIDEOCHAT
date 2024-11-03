@@ -12,7 +12,8 @@
     <button id="endCall" style="display: none;">Закончить звонок</button>
 
     <script>
-        const ws = new WebSocket('ws://videochat-c55f.onrender.com'); // Замените на URL вашего сервера на Render
+        // Используем URL вашего сервера на Render
+        const ws = new WebSocket('wss://videochat-c55f.onrender.com');
 
         ws.onmessage = (event) => {
             const message = JSON.parse(event.data);
