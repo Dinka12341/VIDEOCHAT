@@ -17,7 +17,7 @@
             margin-bottom: 20px;
         }
         video {
-            width: 600px;
+            width: 300px;
             height: auto;
             border: 1px solid #ccc;
             margin: 0 10px;
@@ -74,76 +74,86 @@
         const sendMessageButton = document.getElementById('sendMessage');
         let localStream;
         let peerConnections = {};
+        let userId = null; // Уникальный ID пользователя
+
+        ws.onopen = () => {
+            console.log('Подключено к серверу WebSocket');
+        };
 
         ws.onmessage = async (event) => {
             const message = JSON.parse(event.data);
-            if (message.type === 'clientCount') {
-                document.getElementById('userCount').textContent = `Пользователи в сети: ${message.count}`;
-            } else if (message.type === 'offer') {
-                await handleOffer(message.offer, message.from);
-            } else if (message.type === 'answer') {
-                await handleAnswer(message.answer, message.from);
-            } else if (message.type === 'iceCandidate') {
-                await handleICECandidate(message.candidate, message.from);
-            } else if (message.type === 'chatMessage') {
-                displayMessage(message.from, message.text);
-            }
+            handleMessage(message);
         };
+
+        async function handleMessage(message) {
+            switch (message.type) {
+                case 'clientCount':
+                    updateUserCount(message.count);
+                    break;
+                case 'offer':
+                    await handleOffer(message.offer, message.from);
+                    break;
+                case 'answer':
+                    await handleAnswer(message.answer, message.from);
+                    break;
+                case 'iceCandidate':
+                    await handleICECandidate(message.candidate, message.from);
+                    break;
+                case 'chatMessage':
+                    displayMessage(message.from, message.text);
+                    break;
+            }
+        }
+
+        function updateUserCount(count) {
+            document.getElementById('userCount').textContent = `Пользователи в сети: ${count}`;
+        }
 
         async function startCall() {
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             localVideo.srcObject = localStream;
 
+            // Отправляем уникальный идентификатор пользователя
+            userId = generateUserId();
+            ws.send(JSON.stringify({ type: 'register', id: userId }));
+
             // Создаем новый peerConnection для каждого нового звонка
-            const peerConnection = new RTCPeerConnection();
+            for (let id of Object.keys(peerConnections)) {
+                const peerConnection = new RTCPeerConnection();
+                setupPeerConnection(peerConnection, id);
+                peerConnections[id] = peerConnection; // Храним peerConnection для каждого клиента
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                ws.send(JSON.stringify({ type: 'offer', offer, from: userId, to: id }));
+            }
+        }
 
-            // Добавляем треки из локального потока
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-            // Обработка получения удаленного потока
-            peerConnection.ontrack = (event) => {
-                remoteVideo.srcObject = event.streams[0];
-            };
-
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate, from: ws.id }));
-                }
-            };
-
-            // Отправляем offer всем подключенным клиентам
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', offer, from: ws.id }));
-
-            peerConnections[ws.id] = peerConnection; // Храним peerConnection для каждого клиента
+        function generateUserId() {
+            return 'user-' + Math.random().toString(36).substr(2, 9);
         }
 
         async function handleOffer(offer, from) {
             const peerConnection = new RTCPeerConnection();
-
-            // Обрабатываем входящее предложение
+            setupPeerConnection(peerConnection, from);
             await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-            // Добавляем треки из локального потока
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
-            ws.send(JSON.stringify({ type: 'answer', answer, from: ws.id }));
+            ws.send(JSON.stringify({ type: 'answer', answer, from: userId, to: from }));
+            peerConnections[from] = peerConnection; // Храним peerConnection для отправителя
+        }
 
-            // Обрабатываем удаленный поток
+        function setupPeerConnection(peerConnection, id) {
             peerConnection.ontrack = (event) => {
                 remoteVideo.srcObject = event.streams[0];
             };
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate, from: ws.id }));
+                    ws.send(JSON.stringify({ type: 'iceCandidate', candidate: event.candidate, from: userId, to: id }));
                 }
             };
-
-            peerConnections[from] = peerConnection; // Храним peerConnection для отправителя
         }
 
         async function handleAnswer(answer, from) {
@@ -163,7 +173,7 @@
         sendMessageButton.onclick = () => {
             const messageText = chatInput.value;
             if (messageText) {
-                ws.send(JSON.stringify({ type: 'chatMessage', from: ws.id, text: messageText }));
+                ws.send(JSON.stringify({ type: 'chatMessage', from: userId, text: messageText }));
                 displayMessage('Вы', messageText); // Отображаем сообщение отправителя
                 chatInput.value = ''; // Очищаем поле ввода
             }
@@ -191,7 +201,13 @@
             remoteVideo.srcObject = null; // Убираем удаленное видео
             document.getElementById('startCall').style.display = 'block';
             document.getElementById('endCall').style.display = 'none';
+            ws.send(JSON.stringify({ type: 'disconnect', id: userId }));
         };
+
+        // Обновляем количество пользователей каждые 5 секунд
+        setInterval(() => {
+            ws.send(JSON.stringify({ type: 'requestUserCount' }));
+        }, 5000);
     </script>
 </body>
 </html>
