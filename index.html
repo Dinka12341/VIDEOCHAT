@@ -3,125 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Видеозвонки через чат</title>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
-        video { width: 45%; border: 1px solid black; }
-        #callButton, #hangUpButton { margin: 10px; }
-        #userCount { font-size: 1.5em; margin: 20px; }
-    </style>
+    <title>Видеозвонок</title>
 </head>
 <body>
-    <h1>Видеозвонки через чат</h1>
-    <div id="userCount">Участников в сети: 0</div>
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
-    <br>
-    <button id="callButton">Позвонить</button>
-    <button id="hangUpButton" disabled>Закончить звонок</button>
+    <h1>Видеозвонок</h1>
+    <div id="userCount">Пользователи в сети: 0</div>
+    <button id="startCall">Начать звонок</button>
+    <button id="endCall" style="display: none;">Закончить звонок</button>
 
     <script>
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const callButton = document.getElementById('callButton');
-        const hangUpButton = document.getElementById('hangUpButton');
-        const userCountDisplay = document.getElementById('userCount');
+        const ws = new WebSocket('ws://localhost:8080'); // Замените на URL вашего сервера на Render
 
-        let localStream;
-        let peerConnection;
-
-        const serverUrl = 'ws://localhost:8080'; // Замените на ваш URL сигнализации
-        const signalingServer = new WebSocket(serverUrl);
-
-        signalingServer.onmessage = async (message) => {
-            const data = JSON.parse(message.data);
-            if (data.type === 'clientCount') {
-                updateUserCount(data.count);
-            } else if (data.offer) {
-                await handleOffer(data.offer);
-            } else if (data.answer) {
-                await handleAnswer(data.answer);
-            } else if (data.iceCandidate) {
-                await handleIceCandidate(data.iceCandidate);
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            if (message.type === 'clientCount') {
+                document.getElementById('userCount').textContent = `Пользователи в сети: ${message.count}`;
+            } else {
+                // Обработка других типов сообщений
             }
         };
 
-        function updateUserCount(count) {
-            userCountDisplay.textContent = `Участников в сети: ${count}`;
-        }
+        document.getElementById('startCall').onclick = () => {
+            // Логика начала звонка
+            document.getElementById('startCall').style.display = 'none';
+            document.getElementById('endCall').style.display = 'block';
+        };
 
-        callButton.addEventListener('click', async () => {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
-
-            peerConnection = new RTCPeerConnection();
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-            peerConnection.onicecandidate = ({ candidate }) => {
-                if (candidate) {
-                    signalingServer.send(JSON.stringify({ iceCandidate: candidate }));
-                }
-            };
-
-            peerConnection.ontrack = ({ streams: [stream] }) => {
-                remoteVideo.srcObject = stream;
-            };
-
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            signalingServer.send(JSON.stringify({ offer }));
-            callButton.disabled = true;
-            hangUpButton.disabled = false;
-        });
-
-        hangUpButton.addEventListener('click', () => {
-            hangUpCall();
-        });
-
-        function hangUpCall() {
-            if (peerConnection) {
-                peerConnection.close();
-                peerConnection = null;
-            }
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-                localVideo.srcObject = null;
-            }
-
-            remoteVideo.srcObject = null;
-            callButton.disabled = false;
-            hangUpButton.disabled = true;
-        }
-
-        async function handleOffer(offer) {
-            peerConnection = new RTCPeerConnection();
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            signalingServer.send(JSON.stringify({ answer }));
-
-            peerConnection.onicecandidate = ({ candidate }) => {
-                if (candidate) {
-                    signalingServer.send(JSON.stringify({ iceCandidate: candidate }));
-                }
-            };
-
-            peerConnection.ontrack = ({ streams: [stream] }) => {
-                remoteVideo.srcObject = stream;
-            };
-        }
-
-        async function handleAnswer(answer) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-        }
-
-        async function handleIceCandidate(iceCandidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(iceCandidate));
-        }
+        document.getElementById('endCall').onclick = () => {
+            // Логика окончания звонка
+            document.getElementById('startCall').style.display = 'block';
+            document.getElementById('endCall').style.display = 'none';
+        };
     </script>
 </body>
 </html>
